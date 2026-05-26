@@ -1,0 +1,67 @@
+name: wb-search-trends
+
+services:
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: trendsd-kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: "8"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  trendsd:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: trendsd
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_ADDR: ":8080"
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_TOPIC: "search.events"
+      KAFKA_GROUP_ID: "trendsd"
+      WINDOW: "5m"
+      BUCKET: "10s"
+      REFRESH: "1s"
+      GC: "1m"
+      SNAPSHOT_SIZE: "1000"
+      DEFAULT_TOP_N: "10"
+      MAX_TOP_N: "1000"
+
+  loadgen:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: trendsd-loadgen
+    profiles: ["load"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/loadgen"]
+    command:
+      - "-brokers=kafka:9092"
+      - "-topic=search.events"
+      - "-rps=5000"
+      - "-users=50000"
+      - "-queries=2000"
+      - "-workers=8"

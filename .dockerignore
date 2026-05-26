@@ -1,0 +1,9 @@
+.git
+.idea
+.vscode
+bin
+dist
+*.md
+!README.md
+*.pdf
+.env*
