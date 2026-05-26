@@ -108,17 +108,21 @@ func (r *Ranker) Ingest(query, userID string, at time.Time) {
 	s := r.shardFor(query)
 
 	s.mu.RLock()
-	w, ok := s.queries[query]
+	if w, ok := s.queries[query]; ok {
+		w.add(userID, at)
+		s.mu.RUnlock()
+		return
+	}
 	s.mu.RUnlock()
+
+	s.mu.Lock()
+	w, ok := s.queries[query]
 	if !ok {
-		s.mu.Lock()
-		if w, ok = s.queries[query]; !ok {
-			w = newWindow(r.bucketDur, r.bucketCount)
-			s.queries[query] = w
-		}
-		s.mu.Unlock()
+		w = newWindow(r.bucketDur, r.bucketCount)
+		s.queries[query] = w
 	}
 	w.add(userID, at)
+	s.mu.Unlock()
 }
 
 func (r *Ranker) Top(n int) Snapshot {
@@ -126,15 +130,19 @@ func (r *Ranker) Top(n int) Snapshot {
 	out := Snapshot{
 		GeneratedAt: snap.GeneratedAt,
 		WindowDur:   snap.WindowDur,
-		Entries:     snap.Entries,
+		Entries:     []model.TopEntry{},
 	}
 	if n <= 0 {
-		out.Entries = nil
 		return out
 	}
-	if n < len(snap.Entries) {
-		out.Entries = snap.Entries[:n]
+	size := len(snap.Entries)
+	if n < size {
+		size = n
 	}
+	if size == 0 {
+		return out
+	}
+	out.Entries = append(make([]model.TopEntry, 0, size), snap.Entries[:size]...)
 	return out
 }
 
@@ -167,11 +175,20 @@ type collectedQuery struct {
 	w     *window
 }
 
+var collectedPool = sync.Pool{
+	New: func() any {
+		s := make([]collectedQuery, 0, 1024)
+		return &s
+	},
+}
+
 func (r *Ranker) Refresh() {
 	start := time.Now()
 	now := r.now()
 
-	var all []collectedQuery
+	allPtr := collectedPool.Get().(*[]collectedQuery)
+	all := (*allPtr)[:0]
+
 	for _, s := range r.shards {
 		s.mu.RLock()
 		for q, w := range s.queries {
@@ -196,6 +213,10 @@ func (r *Ranker) Refresh() {
 			heap.Fix(h, 0)
 		}
 	}
+
+	clear(all)
+	*allPtr = all[:0]
+	collectedPool.Put(allPtr)
 
 	size := h.Len()
 	entries := make([]model.TopEntry, size)

@@ -22,6 +22,10 @@ import (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Error("invalid configuration", "err", err)
+		os.Exit(2)
+	}
 
 	log.Info("starting trendsd",
 		"http_addr", cfg.HTTPAddr,

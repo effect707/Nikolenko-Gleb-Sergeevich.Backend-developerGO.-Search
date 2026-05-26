@@ -98,6 +98,25 @@ func TestRankerStopListFiltering(t *testing.T) {
 	}
 }
 
+func TestRankerEventsOutsideWindowIgnored(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	clk := newClock(now)
+	r, _ := testRanker(t, clk)
+
+	r.Ingest("ancient", "u1", now.Add(-time.Hour))
+	r.Ingest("future", "u1", now.Add(time.Hour))
+	r.Ingest("fresh", "u1", now)
+
+	r.Refresh()
+	snap := r.Top(10)
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected exactly 1 entry, got %+v", snap.Entries)
+	}
+	if snap.Entries[0].Query != "fresh" || snap.Entries[0].Count != 1 {
+		t.Fatalf("only fresh must remain, got %+v", snap.Entries[0])
+	}
+}
+
 func TestRankerWindowExpires(t *testing.T) {
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	clk := newClock(now)
@@ -146,6 +165,87 @@ func TestRankerGC(t *testing.T) {
 	}
 	if tracked != 0 {
 		t.Fatalf("expected GC to remove all, got %d remaining", tracked)
+	}
+}
+
+func TestRankerTopReturnsImmutableSnapshot(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	clk := newClock(now)
+	r, _ := testRanker(t, clk)
+
+	r.Ingest("alpha", "u1", now)
+	r.Ingest("alpha", "u2", now)
+	r.Ingest("beta", "u1", now)
+	r.Refresh()
+
+	first := r.Top(10)
+	if len(first.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(first.Entries))
+	}
+
+	first.Entries[0] = first.Entries[1]
+	first.Entries[0].Query = "MUTATED"
+	first.Entries[0].Count = -999
+
+	second := r.Top(10)
+	if len(second.Entries) != 2 {
+		t.Fatalf("snapshot must remain intact, got %d entries", len(second.Entries))
+	}
+	if second.Entries[0].Query != "alpha" || second.Entries[0].Count != 2 {
+		t.Fatalf("snapshot was mutated through Top() result: %+v", second.Entries[0])
+	}
+}
+
+func TestRankerConcurrentIngestAndGC(t *testing.T) {
+	base := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	clk := newClock(base)
+	sl := stoplist.New()
+	r := New(Config{
+		WindowDur:    time.Minute,
+		BucketDur:    10 * time.Second,
+		SnapshotSize: 100,
+		Now:          clk.Now,
+	}, sl)
+
+	const writers = 8
+	const perWriter = 2000
+
+	var stop atomic.Bool
+	var bgWG sync.WaitGroup
+
+	bgWG.Add(1)
+	go func() {
+		defer bgWG.Done()
+		for !stop.Load() {
+			r.GC()
+			r.Refresh()
+		}
+	}()
+
+	var writersWG sync.WaitGroup
+	for w := range writers {
+		writersWG.Add(1)
+		go func(w int) {
+			defer writersWG.Done()
+			for i := range perWriter {
+				r.Ingest("q"+strconv.Itoa(i%20), "u"+strconv.Itoa(w*perWriter+i), base)
+			}
+		}(w)
+	}
+
+	writersWG.Wait()
+	stop.Store(true)
+	bgWG.Wait()
+
+	r.Refresh()
+	snap := r.Top(20)
+	total := int64(0)
+	for _, e := range snap.Entries {
+		total += e.Count
+	}
+	expected := int64(writers * perWriter)
+	if total != expected {
+		t.Fatalf("expected %d total unique users across queries, got %d", expected, total)
 	}
 }
 

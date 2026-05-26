@@ -112,12 +112,26 @@ func TestStopListCRUD(t *testing.T) {
 		t.Fatalf("expected size 2, got %d", resp.Size)
 	}
 
-	rec = do(t, h, http.MethodDelete, "/api/v1/stop-list", `{"words":["casino"]}`)
+	rec = do(t, h, http.MethodDelete, "/api/v1/stop-list?word=casino", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DELETE expected 200, got %d", rec.Code)
 	}
 	if sl.Size() != 1 {
 		t.Fatalf("expected size 1, got %d", sl.Size())
+	}
+
+	rec = do(t, h, http.MethodDelete, "/api/v1/stop-list", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("DELETE without ?word should be 400, got %d", rec.Code)
+	}
+}
+
+func TestTopRejectsTooLargeN(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	h := srv.Handler()
+	rec := do(t, h, http.MethodGet, "/api/v1/trends/top?n=10000", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for n>max, got %d", rec.Code)
 	}
 }
 

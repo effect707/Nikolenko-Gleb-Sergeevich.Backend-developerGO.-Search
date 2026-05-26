@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +25,55 @@ type Config struct {
 	MaxTopN         int
 	ShutdownTimeout time.Duration
 	InitialStopList []string
+}
+
+func (c Config) Validate() error {
+	if c.WindowDur <= 0 {
+		return errors.New("WINDOW must be positive")
+	}
+	if c.BucketDur <= 0 {
+		return errors.New("BUCKET must be positive")
+	}
+	if c.WindowDur%c.BucketDur != 0 {
+		return fmt.Errorf("WINDOW (%s) must be a multiple of BUCKET (%s)", c.WindowDur, c.BucketDur)
+	}
+	if c.WindowDur/c.BucketDur < 2 {
+		return fmt.Errorf("WINDOW/BUCKET must yield at least 2 buckets, got %d", c.WindowDur/c.BucketDur)
+	}
+	if c.SnapshotSize <= 0 {
+		return errors.New("SNAPSHOT_SIZE must be positive")
+	}
+	if c.RefreshEvery <= 0 {
+		return errors.New("REFRESH must be positive")
+	}
+	if c.GCEvery <= 0 {
+		return errors.New("GC must be positive")
+	}
+	if c.DefaultTopN <= 0 {
+		return errors.New("DEFAULT_TOP_N must be positive")
+	}
+	if c.MaxTopN <= 0 {
+		return errors.New("MAX_TOP_N must be positive")
+	}
+	if c.DefaultTopN > c.MaxTopN {
+		return fmt.Errorf("DEFAULT_TOP_N (%d) must not exceed MAX_TOP_N (%d)", c.DefaultTopN, c.MaxTopN)
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errors.New("SHUTDOWN_TIMEOUT must be positive")
+	}
+	if len(c.KafkaBrokers) == 0 {
+		return errors.New("KAFKA_BROKERS must not be empty")
+	}
+	if c.KafkaTopic == "" {
+		return errors.New("KAFKA_TOPIC must not be empty")
+	}
+	if c.KafkaGroupID == "" {
+		return errors.New("KAFKA_GROUP_ID must not be empty")
+	}
+	if c.HTTPAddr == "" {
+		return errors.New("HTTP_ADDR must not be empty")
+	}
+	return nil
 }
 
 func Load() Config {

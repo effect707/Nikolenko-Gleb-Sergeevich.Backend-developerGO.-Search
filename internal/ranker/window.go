@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+var unionPool = sync.Pool{
+	New: func() any {
+		m := make(map[string]struct{}, 64)
+		return &m
+	},
+}
+
 type bucket struct {
 	num   int64
 	users map[string]struct{}
@@ -59,17 +66,24 @@ func (w *window) count(now time.Time) int64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	union := make(map[string]struct{})
+	unionPtr := unionPool.Get().(*map[string]struct{})
+	union := *unionPtr
+	clear(union)
+
 	for i := range w.buckets {
 		b := &w.buckets[i]
-		if b.users == nil || b.num < min || b.num > cur {
+		if len(b.users) == 0 || b.num < min || b.num > cur {
 			continue
 		}
 		for u := range b.users {
 			union[u] = struct{}{}
 		}
 	}
-	return int64(len(union))
+	result := int64(len(union))
+
+	*unionPtr = union
+	unionPool.Put(unionPtr)
+	return result
 }
 
 func (w *window) isEmpty(now time.Time) bool {

@@ -43,14 +43,13 @@ func New(cfg Config, ing Ingester, log *slog.Logger) *Consumer {
 		max = 10 << 20
 	}
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        cfg.Brokers,
-		Topic:          cfg.Topic,
-		GroupID:        cfg.GroupID,
-		MinBytes:       min,
-		MaxBytes:       max,
-		CommitInterval: time.Second,
-		StartOffset:    kafka.LastOffset,
-		MaxWait:        500 * time.Millisecond,
+		Brokers:     cfg.Brokers,
+		Topic:       cfg.Topic,
+		GroupID:     cfg.GroupID,
+		MinBytes:    min,
+		MaxBytes:    max,
+		StartOffset: kafka.LastOffset,
+		MaxWait:     500 * time.Millisecond,
 	})
 	return &Consumer{reader: r, ingester: ing, log: log}
 }

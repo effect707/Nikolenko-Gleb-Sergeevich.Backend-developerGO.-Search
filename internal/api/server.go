@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -109,7 +110,10 @@ func (s *Server) top(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if parsed > s.maxN {
-			parsed = s.maxN
+			writeJSON(w, http.StatusBadRequest, errorBody{
+				Error: fmt.Sprintf("n exceeds maximum allowed value %d", s.maxN),
+			})
+			return
 		}
 		n = parsed
 	}
@@ -148,16 +152,12 @@ func (s *Server) addStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) removeStop(w http.ResponseWriter, r *http.Request) {
-	req, err := readStop(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: err.Error()})
+	words := r.URL.Query()["word"]
+	if len(words) == 0 {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "at least one ?word= is required"})
 		return
 	}
-	if len(req.Words) == 0 {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "words is required"})
-		return
-	}
-	size := s.stopList.Remove(req.Words...)
+	size := s.stopList.Remove(words...)
 	metrics.StopListSize.Set(float64(size))
 	writeJSON(w, http.StatusOK, stopListResponse{Size: size})
 }
